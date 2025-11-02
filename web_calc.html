@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>웹 계산기</title>
+  <style>
+    :root{ --bg:#0f1724; --panel:#0b1220; --accent:#06b6d4; --btn:#111827; --muted:#94a3b8; --glass: rgba(255,255,255,0.03);}    
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0; font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,'Noto Sans KR', 'Malgun Gothic', sans-serif;
+      background: linear-gradient(180deg,#071126 0%, #091026 100%); display:flex; align-items:center; justify-content:center; padding:24px; color:#e6eef6
+    }
+    .card{
+      width:360px; max-width:96vw; background:linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02)); border-radius:16px; padding:18px; box-shadow: 0 8px 30px rgba(2,6,23,0.7);
+    }
+    .title{display:flex; align-items:center; gap:8px; margin-bottom:12px}
+    .logo{width:40px;height:40px;border-radius:8px;background:linear-gradient(135deg,var(--accent),#7c3aed);display:grid;place-items:center;font-weight:700}
+    .title h1{font-size:16px;margin:0}
+    .display{
+      background:var(--glass); border-radius:12px; padding:12px; min-height:72px; display:flex; flex-direction:column; justify-content:center; align-items:flex-end; gap:6px; margin-bottom:12px; word-break:break-all
+    }
+    .expr{font-size:14px;color:var(--muted); min-height:18px}
+    .result{font-size:28px;font-weight:600}
+    .kbd{display:grid; grid-template-columns: repeat(4,1fr); gap:8px}
+    button.key{
+      background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); border:1px solid rgba(255,255,255,0.03); padding:14px; border-radius:10px; font-size:16px; cursor:pointer; color:inherit;
+      transition:transform .06s ease, box-shadow .06s ease;
+    }
+    button.key:active{transform:translateY(1px)}
+    .op{background:linear-gradient(180deg, rgba(6,182,212,0.12), rgba(124,58,237,0.06)); border:1px solid rgba(6,182,212,0.12); color:var(--accent); font-weight:600}
+    .wide{grid-column: span 2}
+    .muted{color:var(--muted)}
+    .small{font-size:12px}
+    .history{margin-top:12px; font-size:13px; color:var(--muted); max-height:90px; overflow:auto; padding-right:6px}
+    .history-item{padding:6px 4px; border-radius:6px; display:flex; justify-content:space-between; gap:8px}
+    .history-item:hover{background:rgba(255,255,255,0.02); cursor:pointer}
+    .footer{margin-top:10px; font-size:12px; color:var(--muted); text-align:center}
+  </style>
+</head>
+<body>
+  <main class="card" role="application" aria-label="웹 계산기">
+    <div class="title">
+      <div class="logo">C</div>
+      <div>
+        <h1>웹 계산기</h1>
+        <div class="small muted">간단한 계산기 — + - × ÷ % (소수) 및 키보드 지원</div>
+      </div>
+    </div>
+
+    <div class="display" id="display">
+      <div class="expr" id="expr" aria-live="polite">0</div>
+      <div class="result" id="result" aria-live="polite">0</div>
+    </div>
+
+    <div class="kbd">
+      <button class="key" data-key="C" title="전체 지우기">C</button>
+      <button class="key" data-key="back" title="지우기 (Backspace)">⌫</button>
+      <button class="key" data-key="%">%</button>
+      <button class="key op" data-key="/">÷</button>
+
+      <button class="key" data-key="7">7</button>
+      <button class="key" data-key="8">8</button>
+      <button class="key" data-key="9">9</button>
+      <button class="key op" data-key="*">×</button>
+
+      <button class="key" data-key="4">4</button>
+      <button class="key" data-key="5">5</button>
+      <button class="key" data-key="6">6</button>
+      <button class="key op" data-key="-">−</button>
+
+      <button class="key" data-key="1">1</button>
+      <button class="key" data-key="2">2</button>
+      <button class="key" data-key="3">3</button>
+      <button class="key op" data-key="+">+</button>
+
+      <button class="key wide" data-key="0">0</button>
+      <button class="key" data-key=".">.</button>
+      <button class="key op" data-key="=">=</button>
+    </div>
+
+    <div class="history" id="history" aria-label="계산 기록"></div>
+
+    <div class="footer">키보드로도 입력하세요 — 숫자키, +-*/ Enter(=), Backspace, %</div>
+  </main>
+
+  <script>
+  (function(){
+    const exprEl = document.getElementById('expr');
+    const resEl = document.getElementById('result');
+    const historyEl = document.getElementById('history');
+
+    let expr = '';
+    let result = null;
+    let history = [];
+
+    function safeEval(userExpr){
+      // 허용 문자만(숫자, 연산자, 소수점, 괄호, 공백, %)
+      if(!/^[0-9+\-*/().%\s]*$/.test(userExpr)) throw new Error('허용되지 않는 문자 포함');
+      // % 처리: 숫자% => (숫자/100)
+      // 간단히 모든 %를 '/100'으로 치환하되 연속되는 % 처리 고려
+      const replaced = userExpr.replace(/%+/g, m => '*'+ (1/Math.pow(100,m.length)).toString().replace(/^0\./,'0.'))
+        .replace(/×/g,'*').replace(/÷/g,'/');
+      // 추가 검증: 연산자 연속 문제를 완화
+      if(/[+\-*/]{3,}/.test(replaced)) throw new Error('잘못된 식');
+      // 안전하게 평가
+      // eslint-disable-next-line no-new-func
+      const fn = new Function('return ('+replaced+')');
+      const val = fn();
+      if(typeof val !== 'number' || !isFinite(val)) throw new Error('계산 불가');
+      return val;
+    }
+
+    function updateDisplay(){
+      exprEl.textContent = expr || '0';
+      resEl.textContent = (result===null)? '0' : result;
+    }
+
+    function addToHistory(input, value){
+      history.unshift({input, value});
+      if(history.length>10) history.pop();
+      renderHistory();
+    }
+
+    function renderHistory(){
+      historyEl.innerHTML = '';
+      history.forEach((h, i)=>{
+        const item = document.createElement('div');
+        item.className = 'history-item';
+        item.tabIndex = 0;
+        item.innerHTML = `<div>${h.input}</div><div class="muted">${h.value}</div>`;
+        item.addEventListener('click', ()=>{
+          expr = h.input; result = h.value; updateDisplay();
+        });
+        item.addEventListener('keypress', (e)=>{ if(e.key==='Enter') item.click(); });
+        historyEl.appendChild(item);
+      });
+    }
+
+    function handleKey(k){
+      if(k === 'C'){ expr=''; result=null; updateDisplay(); return; }
+      if(k === 'back'){ expr = expr.slice(0,-1); updateDisplay(); return; }
+      if(k === '='){ compute(); return; }
+      if(k === 'Enter'){ compute(); return; }
+      if(k === '%') { expr += '%'; updateDisplay(); return; }
+      // allowed input set
+      if(/^[0-9.+\-*/() ]$/.test(k)){
+        // prevent two dots in the same number: simple heuristic
+        if(k==='.'){
+          const lastNum = expr.split(/[^0-9.]/).pop()||'';
+          if(lastNum.includes('.')) return; // ignore extra dot
+        }
+        expr += k;
+        updateDisplay();
+      }
+    }
+
+    function compute(){
+      if(!expr) return;
+      try{
+        result = safeEval(expr);
+        // 포맷: 소수점은 최대 10자리로 정리
+        const formatted = Number.isInteger(result) ? String(result) : String(parseFloat(result.toFixed(10)).toString());
+        addToHistory(expr, formatted);
+        result = formatted;
+        expr = String(result); // 연속 계산 지원
+      }catch(err){
+        result = 'Error';
+      }
+      updateDisplay();
+    }
+
+    document.querySelectorAll('button.key').forEach(btn=>{
+      btn.addEventListener('click', ()=> handleKey(btn.dataset.key));
+    });
+
+    // 키보드 지원
+    window.addEventListener('keydown', (e)=>{
+      const k = e.key;
+      if(k === 'Escape'){ handleKey('C'); e.preventDefault(); return; }
+      if(k === 'Backspace'){ handleKey('back'); e.preventDefault(); return; }
+      if(k === 'Enter' || k === '='){ handleKey('='); e.preventDefault(); return; }
+      if(k === '%'){ handleKey('%'); e.preventDefault(); return; }
+      if(/[0-9+\-/*().]/.test(k)){
+        handleKey(k);
+        e.preventDefault();
+      }
+    });
+
+    // 초기화
+    updateDisplay();
+  })();
+  </script>
+</body>
+</html>
